@@ -1,19 +1,43 @@
 const SECTION_DEFS = [
-  ['top', 'Front Page', ['top world news today Reuters AP BBC']],
-  ['spurs', 'Tottenham & Premier League', ['Tottenham transfer news', 'Tottenham Hotspur Premier League']],
-  ['nba', 'Kings & NBA', ['Sacramento Kings NBA news']],
-  ['mlb', 'Giants & MLB', ['San Francisco Giants MLB news']],
-  ['nfl', '49ers & NFL', ['San Francisco 49ers NFL news']],
-  ['college', 'Kansas Jayhawks', ['Kansas Jayhawks basketball football news']],
-  ['news', 'U.S. & World', ['US world news Reuters AP BBC']],
-  ['work', 'AI, Fraud & Fintech', ['fraud fintech AI cybersecurity news']],
-  ['culture', 'Movies, Music & Pop Culture', ['movies music pop culture news']],
-  ['books', 'Books & Writing', ['books literary fiction essays writing news']],
-  ['art', 'Art, Museums & Photography', ['Van Gogh Monet modern art museum exhibition photography']],
-  ['local', 'NYC · Seattle · SF · Lawrence', ['New York City Seattle San Francisco Lawrence Kansas local news']]
+  ['spurs', 'Tottenham & Premier League', [
+    'Tottenham Hotspur transfer OR injury OR match site:bbc.com/sport OR site:theguardian.com/football OR site:skysports.com OR site:espn.com',
+    'Tottenham Hotspur Premier League latest'
+  ], 2],
+  ['nba', 'Kings & NBA', ['Sacramento Kings NBA latest site:espn.com OR site:nba.com OR site:cbssports.com'], 1],
+  ['mlb', 'Giants & MLB', ['San Francisco Giants MLB latest site:mlb.com OR site:espn.com OR site:sfchronicle.com'], 1],
+  ['nfl', '49ers & NFL', ['San Francisco 49ers NFL latest site:espn.com OR site:nfl.com OR site:sfchronicle.com'], 1],
+  ['news', 'U.S. & World', [
+    'top US world news Reuters AP BBC',
+    'major world news today Reuters BBC AP'
+  ], 2],
+  ['work', 'AI, Fraud & Fintech', ['fraud fintech AI cybersecurity latest site:techcrunch.com OR site:theverge.com OR site:reuters.com OR site:finextra.com'], 1],
+  ['culture', 'Movies, Music & Pop Culture', ['movies music pop culture latest site:vulture.com OR site:variety.com OR site:rollingstone.com OR site:theguardian.com'], 1],
+  ['books', 'Books & Writing', ['books literary fiction essays writing latest site:nytimes.com OR site:theguardian.com OR site:lithub.com OR site:newyorker.com'], 1],
+  ['art', 'Art, Museums & Photography', ['Van Gogh Monet modern art museum exhibition photography latest site:artnews.com OR site:hyperallergic.com OR site:theartnewspaper.com OR site:moma.org'], 1],
+  ['local', 'NYC · Seattle · SF · Lawrence', [
+    'New York City local news today',
+    'Seattle local news today',
+    'San Francisco local news today',
+    'Lawrence Kansas local news today'
+  ], 2]
 ];
 
-const LIMITS = { top: 3, spurs: 4, nba: 3, mlb: 3, nfl: 3, college: 2, news: 4, work: 4, culture: 4, books: 3, art: 3, local: 4 };
+const BLOCKED_PHRASES = [
+  'top 50 english-language news sites',
+  'most popular news sites',
+  'newspaper circulation',
+  'media industry',
+  'press gazette',
+  'news website rankings'
+];
+
+const PREFERRED_SOURCES = [
+  'Reuters', 'Associated Press', 'AP News', 'BBC', 'The Guardian', 'ESPN', 'NBA.com',
+  'MLB.com', 'NFL.com', 'Sky Sports', 'The Athletic', 'Variety', 'Vulture',
+  'Rolling Stone', 'The New Yorker', 'Literary Hub', 'ARTnews', 'Hyperallergic',
+  'The Art Newspaper', 'TechCrunch', 'The Verge', 'San Francisco Chronicle'
+];
+
 const readState = JSON.parse(localStorage.getItem('fold-read') || '{}');
 let totalStories = 0;
 
@@ -62,6 +86,16 @@ function idFor(input) {
   return Math.abs(hash).toString(36);
 }
 
+function sourceScore(source = '') {
+  const index = PREFERRED_SOURCES.findIndex(name => source.toLowerCase().includes(name.toLowerCase()));
+  return index === -1 ? 0 : 100 - index;
+}
+
+function isBlocked(title = '') {
+  const lower = title.toLowerCase();
+  return BLOCKED_PHRASES.some(phrase => lower.includes(phrase));
+}
+
 async function fetchQuery(query) {
   const res = await fetch(rss2jsonUrl(query));
   if (!res.ok) throw new Error('Feed request failed');
@@ -74,8 +108,8 @@ async function fetchQuery(query) {
     link: item.link,
     age: ageLabel(item.pubDate),
     date: new Date(item.pubDate || 0).getTime(),
-    readMinutes: 2
-  }));
+    readMinutes: 1
+  })).filter(item => item.title && !isBlocked(item.title));
 }
 
 function unique(items) {
@@ -85,6 +119,14 @@ function unique(items) {
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
+  });
+}
+
+function rank(items) {
+  return [...items].sort((a, b) => {
+    const sourceDiff = sourceScore(b.source) - sourceScore(a.source);
+    if (sourceDiff) return sourceDiff;
+    return b.date - a.date;
   });
 }
 
@@ -121,16 +163,17 @@ async function loadEdition() {
   const navEl = document.getElementById('sectionNav');
   const status = document.getElementById('status');
 
-  const results = await Promise.all(SECTION_DEFS.map(async ([key, label, queries]) => {
+  const results = await Promise.all(SECTION_DEFS.map(async ([key, label, queries, limit]) => {
     try {
       const groups = await Promise.all(queries.map(fetchQuery));
-      return [key, label, unique(groups.flat()).sort((a,b) => b.date - a.date).slice(0, LIMITS[key])];
+      return [key, label, rank(unique(groups.flat())).slice(0, limit)];
     } catch {
       return [key, label, []];
     }
   }));
 
   status.remove();
+  let firstStoryRendered = false;
   for (const [key, label, items] of results) {
     if (!items.length) continue;
     totalStories += items.length;
@@ -145,7 +188,10 @@ async function loadEdition() {
     section.id = key;
     section.innerHTML = `<div class="sectionHeader"><h2>${escapeHtml(label)}</h2><span>${items.length}</span></div><div class="storyGrid"></div>`;
     const grid = section.querySelector('.storyGrid');
-    items.forEach((story, index) => grid.appendChild(storyCard(story, key === 'top' && index === 0)));
+    items.forEach(story => {
+      grid.appendChild(storyCard(story, !firstStoryRendered));
+      firstStoryRendered = true;
+    });
     sectionsEl.appendChild(section);
   }
 
@@ -154,7 +200,8 @@ async function loadEdition() {
   }
 
   document.getElementById('storyCount').textContent = `${totalStories} stories`;
-  document.getElementById('readMinutes').textContent = `${Math.max(5, Math.round(totalStories * 1.6))} min`;
+  document.getElementById('readMinutes').textContent = `${Math.max(8, Math.round(totalStories * 1.15))} min`;
+  document.getElementById('updatedLabel').textContent = `Updated ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date())}`;
   updateProgress();
 }
 

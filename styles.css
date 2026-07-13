@@ -82,3 +82,17 @@ body[data-theme="dashboard"] .finish h2 {
   .story h3 { font-size: 22px; }
   .story.lead h3 { font-size: 34px; }
 }
+.updatedLabel { margin-top: 6px !important; font-size: 12px; }
+@media (max-width: 720px) {
+  .masthead h1 { font-size: 48px; }
+  .summaryCard { grid-template-columns: repeat(3, 1fr); }
+  .summaryCard > div { padding: 14px 12px; }
+  .summaryCard span { font-size: 11px; }
+  .summaryCard strong { font-size: 18px; }
+  .story { padding: 16px; }
+  .story h3 { font-size: 20px; }
+  .story.lead { padding: 20px; }
+  .story.lead h3 { font-size: 29px; line-height: 1.05; }
+  .section { padding-top: 24px; }
+  .sectionHeader h2 { font-size: 29px; }
+}
